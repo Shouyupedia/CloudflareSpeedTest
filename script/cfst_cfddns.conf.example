@@ -32,10 +32,12 @@ CFST_IP_FILE_V4=ip.txt
 CFST_IP_FILE_V6=ipv6.txt
 # 下载测速地址（-durl），留空则使用 CFST 默认地址（默认地址不保证可用性，建议自建）
 CFST_DOWNLOAD_URL=
-# HTTPing 测试地址（-httping-url），建议填写你通过优选 IP 实际要访问的网站，如 https://www.example.com/cdn-cgi/trace
-# 填写后会使用 HTTPing 模式延迟测速，并过滤掉 返回无效状态码 或 Cloudflare 1034 错误（该 IP 不能用于访问该网站）的 IP
+# HTTP 测试地址（-httping-url），建议填写你通过优选 IP 实际要访问的网站，如 https://www.example.com/cdn-cgi/trace
+# 填写后的测速流程：延迟测速（测试连通性，默认 TCPing）-> HTTP 检查（过滤掉访问该地址时返回无效状态码
+# 或 Cloudflare 1034 错误的 IP，即该 IP 不能用于访问该网站）-> 下载测速；留空则不进行 HTTP 检查
+# 如需使用 HTTPing 模式延迟测速，可在 CFST_EXTRA_ARGS 中加上 -httping
 CFST_HTTPING_URL=
-# HTTPing 有效状态码（-httping-code），留空则 200 301 302 均视为有效
+# HTTP 检查（及 HTTPing）的有效状态码（-httping-code），留空则 200 301 302 均视为有效
 CFST_HTTPING_CODE=
 # 其他 CFST 参数，以空格分隔（不能包含 -f -o -p，也不支持带空格的参数值），例如：
 # CFST_EXTRA_ARGS=-n 200 -tl 250 -tlr 0.2 -dn 5 -sl 2

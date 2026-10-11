@@ -171,7 +171,7 @@
 
  - 只需填写 **根域名 + 完整域名 + API 令牌**，自动查询区域 ID、解析记录 ID，记录不存在时自动创建
  - 支持同时更新 **A（IPv4）+ AAAA（IPv6）** 记录，IP 没有变化时不会重复更新
- - 支持 `-httping-url`：使用你的网站地址进行 HTTPing，过滤掉返回无效状态码或 **Cloudflare 1034 错误**（该 IP 不能用于访问你的网站）的 IP
+ - 测速流程：**延迟测速**（测试连通性，默认 TCPing）→ **HTTP 检查**（填写 `CFST_HTTPING_URL` 后，过滤掉访问你的网站时返回无效状态码或 **Cloudflare 1034 错误** 的 IP，即不能用于访问你网站的 IP）→ **下载测速**
  - 支持 `-durl`：单独指定下载测速地址；下载测速全部失败（速度为 0.00）时不会更新解析记录
  - API 令牌不会出现在进程列表中；配置文件只解析不执行；测速结果保存在私有临时目录；可防止定时任务重叠运行
 
@@ -208,7 +208,7 @@ chmod +x cfst_cfddns.sh cfst
 0 */6 * * * /opt/cfst/cfst_cfddns.sh >> /opt/cfst/cfst_cfddns.log 2>&1
 ```
 
-> **提示：** 建议把 `CFST_HTTPING_URL` 填写为你实际要通过优选 IP 访问的网站地址（如 `https://www.example.com/cdn-cgi/trace`），这样会使用 HTTPing 模式测速，并过滤掉返回 Cloudflare 1034 错误（Edge IP Restricted）的 IP，避免把不能访问你网站的 IP 同步到解析记录。  
+> **提示：** 建议把 `CFST_HTTPING_URL` 填写为你实际要通过优选 IP 访问的网站地址（如 `https://www.example.com/cdn-cgi/trace`），这样会在延迟测速后进行 HTTP 检查，过滤掉返回 Cloudflare 1034 错误（Edge IP Restricted）的 IP，避免把不能访问你网站的 IP 同步到解析记录（延迟测速仍默认使用 TCPing，如需 HTTPing 可在 `CFST_EXTRA_ARGS` 中加上 `-httping`）。  
 > **提示：** 脚本不需要 root 权限，建议使用普通用户运行。已更新或无需更新时退出码为 0，没有找到满足条件的 IP、API 出错时退出码为 1。
 
 </details>

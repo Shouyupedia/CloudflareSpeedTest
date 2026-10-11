@@ -304,9 +304,10 @@ run_cfst() {
 	result_file="${TMP_DIR}/result_${type}.csv"
 
 	# 脚本控制的参数放在最前面，这样额外参数中有误时不会影响这些参数
+	# 测速流程：延迟测速（连通性，默认 TCPing）-> HTTP 检查（指定了 CFST_HTTPING_URL 时，过滤无效状态码及 1034 错误）-> 下载测速
 	args=(-f "$ip_file" -o "$result_file" -p 0)
 	[[ -n "$CFST_DOWNLOAD_URL" ]] && args+=(-durl "$CFST_DOWNLOAD_URL")
-	[[ -n "$CFST_HTTPING_URL" ]] && args+=(-httping -httping-url "$CFST_HTTPING_URL")
+	[[ -n "$CFST_HTTPING_URL" ]] && args+=(-httping-url "$CFST_HTTPING_URL")
 	[[ -n "$CFST_HTTPING_CODE" ]] && args+=(-httping-code "$CFST_HTTPING_CODE")
 	args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 

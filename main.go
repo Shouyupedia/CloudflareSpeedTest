@@ -47,10 +47,11 @@ https://github.com/XIU2/CloudflareSpeedTest
     -httping
         切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-httping-url] 参数；(默认 TCPing)
     -httping-url https://example.com
-        指定 HTTPing 测试地址；仅用于 HTTPing 延迟测速，指定后自动切换为 HTTPing 模式，未指定时使用 [-url] 参数的地址；
-        返回结果需为有效状态码 (见 -httping-code)，且不能是 Cloudflare 1034 错误 (Edge IP Restricted)；(默认 同 -url)
+        指定 HTTP 测试地址；指定后会在延迟测速之后、下载测速之前进行 HTTP 检查，过滤掉访问该地址时
+        返回无效状态码 (见 -httping-code) 或 Cloudflare 1034 错误 (Edge IP Restricted) 的 IP；
+        该参数不会切换延迟测速模式，HTTPing 模式下也使用该地址；(默认 不进行 HTTP 检查，HTTPing 使用 -url 的地址)
     -httping-code 200
-        有效状态代码；HTTPing 延迟测速时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
+        有效状态代码；HTTPing 延迟测速及 HTTP 检查时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
     -cfcolo HKG,KHH,NRT,LAX,SEA,SJC,FRA,MAD
         匹配指定地区；IATA 机场地区码或国家/城市码，英文逗号分隔，仅 HTTPing 模式可用；(默认 所有地区)
 
@@ -140,11 +141,8 @@ https://github.com/XIU2/CloudflareSpeedTest
 		os.Exit(0)
 	}
 
-	// 指定了 HTTPing 测试地址，说明需要通过 HTTP 协议检查 IP 是否可用，因此自动切换为 HTTPing 模式
-	if task.HttpingURL != "" && !task.Httping {
-		task.Httping = true
-		utils.Yellow.Println("[提示] 已指定 [-httping-url] 参数，自动切换为 HTTPing 延迟测速模式...")
-	}
+	// 指定了 HTTP 测试地址时，在延迟测速后、下载测速前进行 HTTP 检查（不会改变延迟测速模式，默认仍为 TCPing）
+	task.HttpCheck = task.HttpingURL != ""
 	if err := task.CheckURL(); err != nil {
 		utils.Red.Printf("[错误] %v\n", err)
 		os.Exit(1)
@@ -156,8 +154,10 @@ func main() {
 
 	fmt.Printf("# XIU2/CloudflareSpeedTest %s \n\n", version)
 
-	// 开始延迟测速 + 过滤延迟/丢包
+	// 开始延迟测速（连通性）+ 过滤延迟/丢包
 	pingData := task.NewPing().Run().FilterDelay().FilterLossRate()
+	// 开始 HTTP 检查（过滤掉返回无效状态码 或 Cloudflare 1034 错误的 IP），未指定 -httping-url 时跳过
+	pingData = task.CheckHttp(pingData)
 	// 开始下载测速
 	speedData := task.TestDownloadSpeed(pingData)
 	utils.ExportCsv(speedData) // 输出文件

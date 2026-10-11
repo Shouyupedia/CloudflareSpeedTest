@@ -60,9 +60,9 @@ func CheckURL() error {
 			return fmt.Errorf("下载测速地址无效 [%s]：%v", DownloadURL, err)
 		}
 	}
-	if Httping {
+	if Httping || HttpCheck {
 		if err := checkURLFormat(HttpingURL); err != nil {
-			return fmt.Errorf("HTTPing 测试地址无效 [%s]：%v", HttpingURL, err)
+			return fmt.Errorf("HTTP 测试地址无效 [%s]：%v", HttpingURL, err)
 		}
 	}
 	return nil
@@ -102,7 +102,7 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 		return utils.DownloadSpeedSet(ipSet)
 	}
 	if len(ipSet) <= 0 { // IP 数组长度(IP数量) 大于 0 时才会继续下载测速
-		utils.Yellow.Println("[信息] 延迟测速结果 IP 数量为 0，跳过下载测速。")
+		utils.Yellow.Println("[信息] 可用 IP 数量为 0，跳过下载测速。")
 		return
 	}
 	testNum := TestCount                        // 等待下载测速的队列数量 先默认等于 下载测速数量(-dn）

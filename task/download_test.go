@@ -13,11 +13,12 @@ import (
 
 // 设置测速地址相关的全局变量，测试结束后恢复
 func setupURL(t *testing.T, url, downloadURL, httpingURL string, disable, httping bool) {
-	oldURL, oldDownloadURL, oldHttpingURL, oldDisable, oldHttping := URL, DownloadURL, HttpingURL, Disable, Httping
+	oldURL, oldDownloadURL, oldHttpingURL, oldDisable, oldHttping, oldCheck := URL, DownloadURL, HttpingURL, Disable, Httping, HttpCheck
 	t.Cleanup(func() {
-		URL, DownloadURL, HttpingURL, Disable, Httping = oldURL, oldDownloadURL, oldHttpingURL, oldDisable, oldHttping
+		URL, DownloadURL, HttpingURL, Disable, Httping, HttpCheck = oldURL, oldDownloadURL, oldHttpingURL, oldDisable, oldHttping, oldCheck
 	})
 	URL, DownloadURL, HttpingURL, Disable, Httping = url, downloadURL, httpingURL, disable, httping
+	HttpCheck = httpingURL != "" // 同 main.go：指定了 HTTP 测试地址时进行 HTTP 检查
 }
 
 func TestCheckURLDefault(t *testing.T) {
@@ -56,10 +57,11 @@ func TestCheckURLInvalid(t *testing.T) {
 	}{
 		{"下载测速地址协议无效", "https://a.example/", "ftp://b.example/", "", false, false, true},
 		{"下载测速地址缺少域名", "https://a.example/", "https:///file", "", false, false, true},
-		{"HTTPing 测试地址无效", "https://a.example/", "", "example.com", false, true, true},
+		{"HTTPing 模式下 HTTP 测试地址无效", "https://a.example/", "", "example.com", false, true, true},
+		{"HTTP 检查（TCPing 模式）时 HTTP 测试地址无效", "https://a.example/", "", "example.com", false, false, true},
 		{"-url 无效且用于 HTTPing", "a.example", "https://b.example/", "", true, true, true},
 		{"禁用下载测速时不检查下载测速地址", "https://a.example/", "ftp://b.example/", "", true, false, false},
-		{"未启用 HTTPing 时不检查 HTTPing 测试地址", "https://a.example/", "", "example.com", false, false, false},
+		{"未启用 HTTPing 且未指定 HTTP 测试地址时不检查 -url", "a.example", "https://b.example/", "", false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
