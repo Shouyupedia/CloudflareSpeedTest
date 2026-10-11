@@ -3,7 +3,7 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 # --------------------------------------------------------------
 #	项目: CloudflareSpeedTest 测速并同步最优 IP 到 Cloudflare DNS（DDNS）
-#	版本: 1.0.0
+#	版本: 1.0.1
 #	项目: https://github.com/XIU2/CloudflareSpeedTest
 # --------------------------------------------------------------
 # 依赖：bash 4+、curl、jq，以及支持 -durl / -test_1043_url 参数的 CFST
@@ -115,7 +115,7 @@ parse_args() {
 
 # 读取配置文件（只解析 配置项=值，不会执行其中的任何代码）
 read_config() {
-	local line key value perm n=0
+	local line key value perm n=0 bad=0
 	[[ -f "$CONFIG_FILE" ]] || die "配置文件不存在 [${CONFIG_FILE}]，请先复制 cfst_cfddns.conf.example 为 cfst_cfddns.conf 并修改配置"
 	[[ -r "$CONFIG_FILE" ]] || die "没有读取配置文件的权限 [${CONFIG_FILE}]"
 	# 配置文件中有 API 令牌/密钥，不应该允许其他用户读取
@@ -127,7 +127,8 @@ read_config() {
 		line="${line%$'\r'}" # 兼容 Windows 换行符
 		[[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
 		if [[ ! "$line" =~ ^[[:space:]]*([A-Z0-9_]+)[[:space:]]*=(.*)$ ]]; then
-			warn "配置文件第 ${n} 行格式错误（应为 配置项=值），已忽略"
+			error "配置文件第 ${n} 行格式错误（应为 配置项=值）"
+			bad=1
 			continue
 		fi
 		key="${BASH_REMATCH[1]}"
@@ -136,11 +137,16 @@ read_config() {
 			value="${BASH_REMATCH[1]}"
 		fi
 		if [[ "$CONFIG_KEYS" != *" ${key} "* ]]; then
-			warn "配置文件第 ${n} 行的配置项 [${key}] 未知，已忽略"
+			error "配置文件第 ${n} 行的配置项 [${key}] 未知"
+			bad=1
 			continue
 		fi
 		printf -v "$key" '%s' "$value"
 	done <"$CONFIG_FILE"
+	# 有配置没有生效时不能继续（如 1034 检查没有生效却照常更新解析记录）
+	if ((bad)); then
+		die "配置文件有误，已停止运行：请检查配置项是否拼写错误；如果配置文件是从新版 cfst_cfddns.conf.example 复制的，请同时把 cfst_cfddns.sh 更新到新版"
+	fi
 }
 
 # 检查配置，认证信息会写入 curl 配置，因此必须严格检查字符，避免注入其他 curl 参数
