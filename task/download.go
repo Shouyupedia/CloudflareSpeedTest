@@ -2,10 +2,12 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -22,21 +24,67 @@ const (
 	defaultDisableDownload         = false
 	defaultTestNum                 = 10
 	defaultMinSpeed        float64 = 0.0
+
+	userAgent              = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36"
+	maxResponseHeaderBytes = 64 << 10 // 响应头大小上限 (64 KB)，避免异常的测速 IP 返回超大响应头占用大量内存
 )
 
 var (
-	URL     = defaultURL
-	Timeout = defaultTimeout
-	Disable = defaultDisableDownload
+	URL         = defaultURL // 测速地址 (-url)，同时也是 下载测速地址、HTTPing 测试地址 未指定时的默认值
+	DownloadURL string       // 下载测速地址 (-durl)，为空时使用 URL
+	Timeout     = defaultTimeout
+	Disable     = defaultDisableDownload
 
 	TestCount = defaultTestNum
 	MinSpeed  = defaultMinSpeed
 )
 
-func checkDownloadDefault() {
+// 未指定 下载测速地址 (-durl)、HTTPing 测试地址 (-httping-url) 时，使用 测速地址 (-url)
+func setDefaultURL() {
 	if URL == "" {
 		URL = defaultURL
 	}
+	if DownloadURL == "" {
+		DownloadURL = URL
+	}
+	if HttpingURL == "" {
+		HttpingURL = URL
+	}
+}
+
+// CheckURL 检查测速地址是否有效（只检查实际会用到的地址）
+func CheckURL() error {
+	setDefaultURL()
+	if !Disable {
+		if err := checkURLFormat(DownloadURL); err != nil {
+			return fmt.Errorf("下载测速地址无效 [%s]：%v", DownloadURL, err)
+		}
+	}
+	if Httping {
+		if err := checkURLFormat(HttpingURL); err != nil {
+			return fmt.Errorf("HTTPing 测试地址无效 [%s]：%v", HttpingURL, err)
+		}
+	}
+	return nil
+}
+
+// 测速地址必须是 http:// 或 https:// 开头的完整地址
+func checkURLFormat(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("仅支持 http:// 或 https:// 开头的地址")
+	}
+	if u.Hostname() == "" {
+		return errors.New("缺少域名")
+	}
+	return nil
+}
+
+func checkDownloadDefault() {
+	setDefaultURL()
 	if Timeout <= 0 {
 		Timeout = defaultTimeout
 	}
@@ -112,6 +160,14 @@ func getDialContext(ip *net.IPAddr) func(ctx context.Context, network, address s
 	}
 }
 
+// 所有连接都发往指定的测速 IP
+func getTransport(ip *net.IPAddr) *http.Transport {
+	return &http.Transport{
+		DialContext:            getDialContext(ip),
+		MaxResponseHeaderBytes: maxResponseHeaderBytes,
+	}
+}
+
 // 统一的请求报错调试输出
 func printDownloadDebugInfo(ip *net.IPAddr, err error, statusCode int, url, lastRedirectURL string, response *http.Response) {
 	finalURL := url // 默认的最终 URL，这样当 response 为空时也能输出
@@ -139,7 +195,7 @@ func printDownloadDebugInfo(ip *net.IPAddr, err error, statusCode int, url, last
 func downloadHandler(ip *net.IPAddr) (float64, string) {
 	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
 	client := &http.Client{
-		Transport: &http.Transport{DialContext: getDialContext(ip)},
+		Transport: getTransport(ip),
 		Timeout:   Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
@@ -156,27 +212,27 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		},
 	}
 	defer client.CloseIdleConnections()
-	req, err := http.NewRequest("GET", URL, nil)
+	req, err := http.NewRequest("GET", DownloadURL, nil)
 	if err != nil {
 		if utils.Debug { // 调试模式下，输出更多信息
-			utils.Red.Printf("[调试] IP: %s, 下载测速请求创建失败，错误信息: %v, 下载测速地址: %s\n", ip.String(), err, URL)
+			utils.Red.Printf("[调试] IP: %s, 下载测速请求创建失败，错误信息: %v, 下载测速地址: %s\n", ip.String(), err, DownloadURL)
 		}
 		return 0.0, ""
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
+	req.Header.Set("User-Agent", userAgent)
 
 	response, err := client.Do(req)
 	if err != nil {
 		if utils.Debug { // 调试模式下，输出更多信息
-			printDownloadDebugInfo(ip, err, 0, URL, lastRedirectURL, response)
+			printDownloadDebugInfo(ip, err, 0, DownloadURL, lastRedirectURL, response)
 		}
 		return 0.0, ""
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
 		if utils.Debug { // 调试模式下，输出更多信息
-			printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
+			printDownloadDebugInfo(ip, nil, response.StatusCode, DownloadURL, lastRedirectURL, response)
 		}
 		return 0.0, ""
 	}

@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/task"
@@ -15,6 +17,8 @@ import (
 
 var (
 	version, versionNew string
+
+	regexpVersion = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.]+)?$`) // 匹配版本号格式（如 v2.3.4）
 )
 
 func init() {
@@ -37,9 +41,14 @@ https://github.com/XIU2/CloudflareSpeedTest
         指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
     -url https://cf.xiu2.xyz/url
         指定测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
+    -durl https://cf.xiu2.xyz/url
+        指定下载测速地址；仅用于下载测速，未指定时使用 [-url] 参数的地址；(默认 同 -url)
 
     -httping
-        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-url] 参数；(默认 TCPing)
+        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-httping-url] 参数；(默认 TCPing)
+    -httping-url https://example.com
+        指定 HTTPing 测试地址；仅用于 HTTPing 延迟测速，指定后自动切换为 HTTPing 模式，未指定时使用 [-url] 参数的地址；
+        返回结果需为有效状态码 (见 -httping-code)，且不能是 Cloudflare 1034 错误 (Edge IP Restricted)；(默认 同 -url)
     -httping-code 200
         有效状态代码；HTTPing 延迟测速时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
     -cfcolo HKG,KHH,NRT,LAX,SEA,SJC,FRA,MAD
@@ -84,8 +93,10 @@ https://github.com/XIU2/CloudflareSpeedTest
 	flag.IntVar(&downloadTime, "dt", 10, "下载测速时间")
 	flag.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
 	flag.StringVar(&task.URL, "url", "https://cf.xiu2.xyz/url", "指定测速地址")
+	flag.StringVar(&task.DownloadURL, "durl", "", "指定下载测速地址")
 
 	flag.BoolVar(&task.Httping, "httping", false, "切换测速模式")
+	flag.StringVar(&task.HttpingURL, "httping-url", "", "指定HTTPing测试地址")
 	flag.IntVar(&task.HttpingStatusCode, "httping-code", 0, "有效状态代码")
 	flag.StringVar(&task.HttpingCFColo, "cfcolo", "", "匹配指定地区")
 
@@ -128,6 +139,16 @@ https://github.com/XIU2/CloudflareSpeedTest
 		}
 		os.Exit(0)
 	}
+
+	// 指定了 HTTPing 测试地址，说明需要通过 HTTP 协议检查 IP 是否可用，因此自动切换为 HTTPing 模式
+	if task.HttpingURL != "" && !task.Httping {
+		task.Httping = true
+		utils.Yellow.Println("[提示] 已指定 [-httping-url] 参数，自动切换为 HTTPing 延迟测速模式...")
+	}
+	if err := task.CheckURL(); err != nil {
+		utils.Red.Printf("[错误] %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func main() {
@@ -163,14 +184,22 @@ func checkUpdate() {
 	if err != nil {
 		return
 	}
-	// 读取资源数据 body: []byte
-	body, err := io.ReadAll(res.Body)
+	// 关闭资源流
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return
+	}
+	// 读取资源数据 body: []byte（限制读取大小，避免异常响应占用大量内存）
+	body, err := io.ReadAll(io.LimitReader(res.Body, 64))
 	if err != nil {
 		return
 	}
-	// 关闭资源流
-	defer res.Body.Close()
-	if string(body) != version {
-		versionNew = string(body)
+	// 校验版本号格式，避免把异常内容（如终端控制字符）直接输出到终端
+	newVersion := strings.TrimSpace(string(body))
+	if !regexpVersion.MatchString(newVersion) {
+		return
+	}
+	if newVersion != version {
+		versionNew = newVersion
 	}
 }

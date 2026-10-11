@@ -172,12 +172,19 @@ https://github.com/XIU2/CloudflareSpeedTest
     -url https://cf.xiu2.xyz/url
         指定测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
         当下载测速时，软件会从 HTTP 响应头中获取该 IP 当前地区码（支持 Cloudflare、AWS CloudFront、Fastly、Gcore、CDN77、Bunny 等 CDN）并显示出来。
+    -durl https://cf.xiu2.xyz/url
+        指定下载测速地址；仅用于下载测速，未指定时使用 [-url] 参数的地址；(默认 同 -url)
+        适用于 HTTPing 测试地址 和 下载测速地址 需要分开指定的情况（如 HTTPing 测试自己的网站，下载测速使用大文件地址）。
 
     -httping
-        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-url] 参数；(默认 TCPing)
+        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-httping-url] 参数；(默认 TCPing)
         当使用 HTTP 测速模式时，软件会从 HTTP 响应头中获取该 IP 当前地区码（支持 Cloudflare、AWS CloudFront、Fastly、Gcore、CDN77、Bunny 等 CDN）并显示出来。
         注意：HTTPing 本质上也算一种 网络扫描 行为，因此如果你在服务器上面运行，需要降低并发(-n)，否则可能会被一些严格的商家暂停服务。
         如果你遇到 HTTPing 首次测速可用 IP 数量正常，后续测速越来越少甚至直接为 0，但停一段时间后又恢复了的情况，那么也可能是被 运营商、Cloudflare CDN 认为你在网络扫描而 触发临时限制机制，因此才会过一会儿就恢复了，建议降低并发(-n)减少这种情况的发生。
+    -httping-url https://example.com
+        指定 HTTPing 测试地址；仅用于 HTTPing 延迟测速，指定后自动切换为 HTTPing 模式，未指定时使用 [-url] 参数的地址；
+        返回结果需为有效状态码 (见 -httping-code)，且不能是 Cloudflare 1034 错误 (Edge IP Restricted)；(默认 同 -url)
+        Cloudflare 1034 错误代表该 IP 不允许用于访问该域名，即使改 Hosts/DNS 指向该 IP 也无法访问，因此建议填写你实际要通过优选 IP 访问的网站地址。
     -httping-code 200
         有效状态代码；HTTPing 延迟测速时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
     -cfcolo HKG,KHH,NRT,LAX,SEA,SJC,FRA,MAD
@@ -406,7 +413,9 @@ HTTP 协议适用于快速测试某域名指向某 IP 时是否可以访问，�
 
 > 注意：HTTPing 本质上也算一种**网络扫描**行为，因此如果你在服务器上面运行，需要**降低并发**(`-n`)，否则可能会被一些严格的商家暂停服务。如果你遇到 HTTPing 首次测速可用 IP 数量正常，后续测速越来越少甚至直接为 0，但停一段时间后又恢复了的情况，那么也可能是被 运营商、Cloudflare CDN 认为你在网络扫描而**触发临时限制机制**，因此才会过一会儿就恢复了，建议**降低并发**(`-n`)减少这种情况的发生。
 
-> 另外，本软件 HTTPing 仅获取**响应头(response headers)**，并不获取正文内容（即 URL 文件大小不影响 HTTPing 测试，但如果你还要下载测速的话，那么还是需要一个大文件的），类似于 curl -i 功能。
+> 另外，本软件 HTTPing 首次访问时只读取正文开头最多 **32 KB** 的内容（用于判断是否为 Cloudflare 1034 错误），后续的延迟测速仅获取**响应头(response headers)**，类似于 curl -i 功能，因此 URL 文件大小基本不影响 HTTPing 测试（但如果你还要下载测速的话，那么还是需要一个大文件的，可以通过 `-durl` 参数单独指定下载测速地址）。
+
+> 另外，HTTPing 会过滤掉返回 **Cloudflare 1034 错误**（Edge IP Restricted，即该 IP 不允许用于访问该域名，改 Hosts/DNS 指向该 IP 后也无法访问）的 IP，无论 HTTP 状态码是什么，因此建议通过 `-httping-url` 参数指定你**实际要通过优选 IP 访问的网站地址**（如 `https://www.example.com/cdn-cgi/trace`）。
 
 > 另外，HTTPing 过程中，软件会从 HTTP 响应头中获取该 IP 当前地区码（支持 Cloudflare、AWS CloudFront、Fastly、Gcore、CDN77、Bunny 等 CDN）并显示出来，而 TCPing 过程中无法这样做（但 下载测速 时也会这样做来获取地区码，毕竟下载测速也是个 HTTP 链接）
 
@@ -420,6 +429,10 @@ cfst -httping -httping-code 200
 # 通过 -url 参数来指定 HTTPing 测试地址（可以是任意网页 URL，不局限于具体文件地址）
 cfst -httping -url https://cf.xiu2.xyz/url
 # 如果你要 HTTPing 测试其他网站/CDN，那么指定一个该网站/使用该 CDN 的地址（因为软件默认地址是 Cloudflare 的，只能用于测试 Cloudflare 的 IP）
+
+# 通过 -httping-url 参数单独指定 HTTPing 测试地址（指定后自动切换为 HTTPing 模式），通过 -durl 参数单独指定下载测速地址
+# 这样就可以用自己的网站来过滤掉无效（如返回 Cloudflare 1034 错误）的 IP，同时用大文件地址来下载测速
+cfst -httping-url https://www.example.com/cdn-cgi/trace -durl https://cf.xiu2.xyz/url
 
 # 注意：如果测速地址为 HTTP 协议，记得加上 -tp 80（这个参数会影响 延迟测速/下载测速 时使用的端口）
 # 同理，如果要测速 80 端口，那么也需要加上 -url 参数来指定一个 http:// 协议的地址才行（且该地址不会强制重定向至 HTTPS），如果是非 80 443 端口，那么需要确定该下载测速地址是否支持通过该端口访问。
@@ -558,6 +571,10 @@ cfst -url https://cf.xiu2.xyz/url
 
 # 注意：如果测速地址为 HTTP 协议（该地址不能强制重定向至 HTTPS），记得加上 -tp 80（这个参数会影响 延迟测速/下载测速 时使用的端口），如果是非 80 443 端口，那么需要确定下载测速地址是否支持通过该端口访问。
 cfst -tp 80 -url http://speed.cloudflare.com/__down?bytes=99999999
+
+# 如果 下载测速地址 和 HTTPing 测试地址 需要分开指定，可以使用 -durl（仅用于下载测速）和 -httping-url（仅用于 HTTPing）参数，没有指定的仍使用 -url 的地址
+# 注意：-tp 参数对两者都生效，因此这两个地址需要使用相同的协议（都是 http:// 或都是 https://）
+cfst -durl https://cf.xiu2.xyz/url -httping-url https://www.example.com/cdn-cgi/trace
 ```
 
 </details>
@@ -821,6 +838,12 @@ cfst -f 1.txt
 考虑到很多人获得最快 Cloudflare CDN IP 后，需要替换 Hosts 文件中的 IP。
 
 可以看这个 [**Issues**](https://github.com/XIU2/CloudflareSpeedTest/discussions/312) 获取 **Windows/Linux 自动更新 Hosts 脚本**！
+
+****
+
+#### \# 自动更新 Cloudflare 域名解析记录（DDNS）
+
+如果你的域名托管在 Cloudflare，可以使用 Linux 脚本 [**cfst_cfddns.sh**](script/README.md#-cfst_cfddnssh) 定时测速，并把最优 IP 同步到 Cloudflare DNS 记录（支持 IPv4/IPv6，记录不存在时自动创建，并可通过 `-httping-url` 过滤掉返回 Cloudflare 1034 错误的 IP）。
 
 ****
 

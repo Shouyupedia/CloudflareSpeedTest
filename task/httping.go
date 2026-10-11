@@ -15,69 +15,86 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
+const httpingBodyCheckSize = 32 << 10 // HTTPing 检查响应内容时最多读取的大小 (32 KB)，足够判断是否为 Cloudflare 错误页面
+
 var (
 	Httping               bool
+	HttpingURL            string // HTTPing 测试地址 (-httping-url)，为空时使用 URL
 	HttpingStatusCode     int
 	HttpingCFColo         string
 	HttpingCFColomap      *sync.Map
 	RegexpColoIATACode    = regexp.MustCompile(`[A-Z]{3}`)  // 匹配 IATA 机场地区码（俗称 机场三字码）的正则表达式
 	RegexpColoCountryCode = regexp.MustCompile(`[A-Z]{2}`)  // 匹配国家地区码的正则表达式（如 US、CN、UK 等）
 	RegexpColoGcore       = regexp.MustCompile(`^[a-z]{2}`) // 匹配城市地区码的正则表达式（小写，如 us、cn、uk 等）
+
+	// 匹配 Cloudflare 1034 错误 (Edge IP Restricted，即该 IP 不允许用于访问该域名) 的响应内容
+	// 非浏览器请求返回纯文本 "error code: 1034"，浏览器请求返回包含 "Edge IP Restricted"、<span class="cf-error-code">1034</span> 的 HTML 页面
+	regexpCFError1034 = regexp.MustCompile(`(?i)\berror\s*(code)?\s*:?\s*1034\b|edge\s+ip\s+restricted|cf-error-code[^>]*>\s*1034\s*<`)
 )
 
 // pingReceived pingTotalTime
 func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	hc := http.Client{
-		Timeout: time.Second * 2,
-		Transport: &http.Transport{
-			DialContext: getDialContext(ip),
-			//TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 跳过证书验证
-		},
+		Timeout:   time.Second * 2,
+		Transport: getTransport(ip),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 阻止重定向
 		},
 	}
 	defer hc.CloseIdleConnections()
 
-	// 先访问一次获得 HTTP 状态码 及 地区码
+	// 先访问一次获得 HTTP 状态码、地区码 及 部分响应内容（用于判断是否为 Cloudflare 1034 错误）
 	var colo string
 	{
-		request, err := http.NewRequest(http.MethodHead, URL, nil)
+		request, err := newHttpingRequest(http.MethodGet)
 		if err != nil {
 			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Red.Printf("[调试] IP: %s, 延迟测速请求创建失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, URL)
+				utils.Red.Printf("[调试] IP: %s, 延迟测速请求创建失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, HttpingURL)
 			}
 			return 0, 0, ""
 		}
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
 		response, err := hc.Do(request)
 		if err != nil {
 			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Red.Printf("[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, URL)
+				utils.Red.Printf("[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, HttpingURL)
 			}
 			return 0, 0, ""
 		}
-		defer response.Body.Close()
+		// 只读取开头部分响应内容（测速地址可能是个大文件），足够判断是否为 Cloudflare 错误页面
+		body, err := io.ReadAll(io.LimitReader(response.Body, httpingBodyCheckSize+1))
+		response.Body.Close()
+		if err != nil {
+			if utils.Debug { // 调试模式下，输出更多信息
+				utils.Red.Printf("[调试] IP: %s, 延迟测速失败，读取响应内容出错: %v, 测速地址: %s\n", ip.String(), err, HttpingURL)
+			}
+			return 0, 0, ""
+		}
+
+		// 返回 Cloudflare 1034 错误说明该 IP 不允许用于访问该测速地址的域名，无论状态码是什么都视为无效
+		if isCFError1034(body) {
+			if utils.Debug { // 调试模式下，输出更多信息
+				utils.Red.Printf("[调试] IP: %s, 延迟测速终止，返回 Cloudflare 1034 错误 (Edge IP Restricted)，HTTP 状态码: %d, 测速地址: %s\n", ip.String(), response.StatusCode, HttpingURL)
+			}
+			return 0, 0, ""
+		}
 
 		//fmt.Println("IP:", ip, "StatusCode:", response.StatusCode, response.Request.URL)
 		// 如果未指定的 HTTP 状态码，或指定的状态码不合规，则默认只认为 200、301、302 才算 HTTPing 通过
-		if HttpingStatusCode == 0 ||  HttpingStatusCode < 100 || HttpingStatusCode > 599 {
+		if HttpingStatusCode == 0 || HttpingStatusCode < 100 || HttpingStatusCode > 599 {
 			if response.StatusCode != 200 && response.StatusCode != 301 && response.StatusCode != 302 {
 				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s\n", ip.String(), response.StatusCode, URL)
+					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s\n", ip.String(), response.StatusCode, HttpingURL)
 				}
 				return 0, 0, ""
 			}
 		} else {
 			if response.StatusCode != HttpingStatusCode {
 				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 指定的 HTTP 状态码 %d, 测速地址: %s\n", ip.String(), response.StatusCode, HttpingStatusCode, URL)
+					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 指定的 HTTP 状态码 %d, 测速地址: %s\n", ip.String(), response.StatusCode, HttpingStatusCode, HttpingURL)
 				}
 				return 0, 0, ""
 			}
 		}
-
-		io.Copy(io.Discard, response.Body)
 
 		// 通过头部参数获取地区码
 		colo = getHeaderColo(response.Header)
@@ -85,12 +102,23 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		// 只有指定了地区才匹配机场地区码
 		if HttpingCFColo != "" {
 			// 判断是否匹配指定的地区码
+			headerColo := colo
 			colo = p.filterColo(colo)
 			if colo == "" { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
 				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 地区码不匹配: %s\n", ip.String(), colo)
+					utils.Red.Printf("[调试] IP: %s, 地区码不匹配: %s\n", ip.String(), headerColo)
 				}
 				return 0, 0, ""
+			}
+		}
+
+		// 响应内容没有读取完时（超过 httpingBodyCheckSize）该连接会被关闭，因此先重新建立连接（不计时），避免下面的延迟测速计入 TCP/TLS 握手耗时
+		if len(body) > httpingBodyCheckSize {
+			if request, err := newHttpingRequest(http.MethodHead); err == nil {
+				if response, err := hc.Do(request); err == nil {
+					io.Copy(io.Discard, response.Body)
+					response.Body.Close()
+				}
 			}
 		}
 	}
@@ -99,12 +127,11 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	success := 0
 	var delay time.Duration
 	for i := 0; i < PingTimes; i++ {
-		request, err := http.NewRequest(http.MethodHead, URL, nil)
+		request, err := newHttpingRequest(http.MethodHead)
 		if err != nil {
-			log.Fatal("意外的错误，情报告：", err)
+			log.Fatal("意外的错误，请报告：", err)
 			return 0, 0, ""
 		}
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
 		if i == PingTimes-1 {
 			request.Header.Set("Connection", "close")
 		}
@@ -121,6 +148,21 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	}
 
 	return success, delay, colo
+}
+
+// 创建 HTTPing 请求
+func newHttpingRequest(method string) (*http.Request, error) {
+	request, err := http.NewRequest(method, HttpingURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("User-Agent", userAgent)
+	return request, nil
+}
+
+// 判断响应内容是否为 Cloudflare 1034 错误 (Edge IP Restricted)
+func isCFError1034(body []byte) bool {
+	return regexpCFError1034.Match(body)
 }
 
 func MapColoMap() *sync.Map {

@@ -37,13 +37,16 @@ type Ping struct {
 func checkPingDefault() {
 	if Routines <= 0 {
 		Routines = defaultRoutines
+	} else if Routines > maxRoutine { // 限制最大线程数，避免并发连接过多耗尽系统资源
+		Routines = maxRoutine
 	}
-	if TCPPort <= 0 || TCPPort >= 65535 {
+	if TCPPort <= 0 || TCPPort > 65535 {
 		TCPPort = defaultPort
 	}
 	if PingTimes <= 0 {
 		PingTimes = defaultPingTimes
 	}
+	setDefaultURL()
 }
 
 func NewPing() *Ping {
@@ -119,23 +122,28 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (recv int, totalDelay time.Durati
 	return
 }
 
-func (p *Ping) appendIPData(data *utils.PingData) {
+// 添加测速结果，并返回当前可用 IP 数量
+func (p *Ping) appendIPData(data *utils.PingData) int {
 	p.m.Lock()
 	defer p.m.Unlock()
 	p.csv = append(p.csv, utils.CloudflareIPData{
 		PingData: data,
 	})
+	return len(p.csv)
+}
+
+// 当前可用 IP 数量（p.csv 会被多个线程同时修改，因此需要加锁读取）
+func (p *Ping) ableCount() int {
+	p.m.Lock()
+	defer p.m.Unlock()
+	return len(p.csv)
 }
 
 // handle tcping
 func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 	recv, totalDlay, colo := p.checkConnection(ip)
-	nowAble := len(p.csv)
-	if recv != 0 {
-		nowAble++
-	}
-	p.bar.Grow(1, strconv.Itoa(nowAble))
 	if recv == 0 {
+		p.bar.Grow(1, strconv.Itoa(p.ableCount()))
 		return
 	}
 	data := &utils.PingData{
@@ -145,5 +153,5 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 		Delay:    totalDlay / time.Duration(recv),
 		Colo:     colo,
 	}
-	p.appendIPData(data)
+	p.bar.Grow(1, strconv.Itoa(p.appendIPData(data)))
 }
