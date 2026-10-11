@@ -6,7 +6,7 @@ export PATH
 #	版本: 1.0.0
 #	项目: https://github.com/XIU2/CloudflareSpeedTest
 # --------------------------------------------------------------
-# 依赖：bash 4+、curl、jq，以及支持 -durl / -httping-url 参数的 CFST
+# 依赖：bash 4+、curl、jq，以及支持 -durl / -test_1043_url 参数的 CFST
 # 使用前请先复制 cfst_cfddns.conf.example 为 cfst_cfddns.conf 并修改其中的配置
 
 set -uo pipefail
@@ -23,7 +23,7 @@ RECORD_TYPES=()
 EXTRA_ARGS=()
 
 # 配置项及默认值（不读取同名环境变量，只以配置文件为准）
-CONFIG_KEYS=" CF_API_TOKEN CF_API_KEY CF_EMAIL CF_ZONE_ID CF_ZONE_NAME CF_RECORD_NAME CF_RECORD_TYPE CF_TTL CF_PROXIED CFST_BIN CFST_IP_FILE_V4 CFST_IP_FILE_V6 CFST_DOWNLOAD_URL CFST_HTTPING_URL CFST_HTTPING_CODE CFST_EXTRA_ARGS "
+CONFIG_KEYS=" CF_API_TOKEN CF_API_KEY CF_EMAIL CF_ZONE_ID CF_ZONE_NAME CF_RECORD_NAME CF_RECORD_TYPE CF_TTL CF_PROXIED CFST_BIN CFST_IP_FILE_V4 CFST_IP_FILE_V6 CFST_DOWNLOAD_URL CFST_HTTPING_URL CFST_HTTPING_CODE CFST_TEST_1043_URL CFST_EXTRA_ARGS "
 CF_API_TOKEN=""
 CF_API_KEY=""
 CF_EMAIL=""
@@ -39,6 +39,7 @@ CFST_IP_FILE_V6="ipv6.txt"
 CFST_DOWNLOAD_URL=""
 CFST_HTTPING_URL=""
 CFST_HTTPING_CODE=""
+CFST_TEST_1043_URL=""
 CFST_EXTRA_ARGS=""
 
 usage() {
@@ -200,6 +201,9 @@ check_config() {
 	if [[ -n "$CFST_HTTPING_URL" ]] && ! is_http_url "$CFST_HTTPING_URL"; then
 		die "CFST_HTTPING_URL 必须是 http:// 或 https:// 开头的地址"
 	fi
+	if [[ -n "$CFST_TEST_1043_URL" ]] && ! is_http_url "$CFST_TEST_1043_URL"; then
+		die "CFST_TEST_1043_URL 必须是 http:// 或 https:// 开头的地址"
+	fi
 	if [[ -n "$CFST_HTTPING_CODE" && ! "$CFST_HTTPING_CODE" =~ ^[1-5][0-9][0-9]$ ]]; then
 		die "CFST_HTTPING_CODE 必须是 HTTP 状态码（如 200）"
 	fi
@@ -304,10 +308,12 @@ run_cfst() {
 	result_file="${TMP_DIR}/result_${type}.csv"
 
 	# 脚本控制的参数放在最前面，这样额外参数中有误时不会影响这些参数
-	# 测速流程：延迟测速（连通性，默认 TCPing）-> HTTP 检查（指定了 CFST_HTTPING_URL 时，过滤无效状态码及 1034 错误）-> 下载测速
+	# 测速流程：先测速优选域名（脚本目录下的 bestcf-domain.txt）解析出的 IP，再测速 IP 段数据，最后合并排序；
+	# 每组 IP：延迟测速（默认 HTTPing）-> 1034 检查（填写了 CFST_TEST_1043_URL 时）-> 下载测速
 	args=(-f "$ip_file" -o "$result_file" -p 0)
 	[[ -n "$CFST_DOWNLOAD_URL" ]] && args+=(-durl "$CFST_DOWNLOAD_URL")
 	[[ -n "$CFST_HTTPING_URL" ]] && args+=(-httping-url "$CFST_HTTPING_URL")
+	[[ -n "$CFST_TEST_1043_URL" ]] && args+=(-test_1043_url "$CFST_TEST_1043_URL")
 	[[ -n "$CFST_HTTPING_CODE" ]] && args+=(-httping-code "$CFST_HTTPING_CODE")
 	args+=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
 

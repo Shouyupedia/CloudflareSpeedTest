@@ -64,14 +64,14 @@ func TestHttpCheckIP(t *testing.T) {
 		want       bool
 	}{
 		{"200 正常", 0, 200, "ok", true},
+		{"204 正常", 0, 204, "", true},
 		{"302 正常", 0, 302, "", true},
 		{"404 无效状态码", 0, 404, "not found", false},
+		{"500 无效状态码", 0, 500, "error", false},
 		{"403 纯文本 1034 错误", 0, 403, "error code: 1034", false},
-		{"指定状态码 403 时仍过滤纯文本 1034 错误", 403, 403, "error code: 1034", false},
-		{"指定状态码 403 时仍过滤 HTML 1034 错误", 403, 403, cfError1034HTML, false},
 		{"状态码有效但内容为 1034 错误", 0, 200, cfError1034HTML, false},
-		{"指定状态码 403 且不是 1034 错误", 403, 403, "forbidden", true},
-		{"指定状态码不匹配", 200, 302, "", false},
+		{"-httping-code 只用于 HTTPing，不影响 1034 检查（403）", 403, 403, "forbidden", false},
+		{"-httping-code 只用于 HTTPing，不影响 1034 检查（200）", 204, 200, "ok", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -172,16 +172,16 @@ func TestCheckHttpFilterKeepsOrder(t *testing.T) {
 }
 
 func TestCheckHttpDisabled(t *testing.T) {
-	oldCheck := HttpCheck
-	defer func() { HttpCheck = oldCheck }()
-	HttpCheck = false
-	ipSet := makeIPSet("192.0.2.1", "192.0.2.2") // 未启用时不会访问网络
+	old := Test1043URL
+	defer func() { Test1043URL = old }()
+	Test1043URL = ""
+	ipSet := makeIPSet("192.0.2.1", "192.0.2.2") // 未指定 1034 检查地址时不会访问网络
 	if result := CheckHttp(ipSet); len(result) != 2 {
-		t.Errorf("未启用 HTTP 检查时 IP 数量 = %d, want 2", len(result))
+		t.Errorf("未指定 1034 检查地址时 IP 数量 = %d, want 2", len(result))
 	}
 }
 
-// 延迟测速 -> HTTP 检查：通过 HTTP 测试地址过滤掉返回 1034 错误的 IP
+// 禁用下载测速时检查所有 IP：通过 1034 检查地址过滤掉返回 1034 错误的 IP
 func TestCheckHttp(t *testing.T) {
 	for _, tt := range []struct {
 		path string
@@ -194,12 +194,8 @@ func TestCheckHttp(t *testing.T) {
 			}
 		})
 		setupHttping(t, s, 0)
-		oldCheck := HttpCheck
-		HttpCheck = true
-		HttpingURL = "http://cfst.test" + tt.path
-		result := CheckHttp(makeIPSet("127.0.0.1"))
-		HttpCheck = oldCheck
-		if len(result) != tt.want {
+		Test1043URL = "http://cfst.test" + tt.path
+		if result := CheckHttp(makeIPSet("127.0.0.1")); len(result) != tt.want {
 			t.Errorf("%s: 通过检查的 IP 数量 = %d, want %d", tt.path, len(result), tt.want)
 		}
 	}

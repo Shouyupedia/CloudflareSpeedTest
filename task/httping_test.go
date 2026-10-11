@@ -48,11 +48,11 @@ func (s *httpingTestServer) count(method string) int {
 	return n
 }
 
-// 设置 HTTPing / HTTP 检查相关的全局变量（测试地址指向测试服务器），测试结束后恢复
+// 设置 HTTPing / 1034 检查相关的全局变量（测试地址指向测试服务器），测试结束后恢复
 func setupHttping(t *testing.T, s *httpingTestServer, statusCode int) {
-	oldURL, oldPort, oldTimes, oldCode, oldColo, oldColoMap := HttpingURL, TCPPort, PingTimes, HttpingStatusCode, HttpingCFColo, HttpingCFColomap
+	oldURL, oldTest1043URL, oldPort, oldTimes, oldCode, oldColo, oldColoMap := HttpingURL, Test1043URL, TCPPort, PingTimes, HttpingStatusCode, HttpingCFColo, HttpingCFColomap
 	t.Cleanup(func() {
-		HttpingURL, TCPPort, PingTimes, HttpingStatusCode, HttpingCFColo, HttpingCFColomap = oldURL, oldPort, oldTimes, oldCode, oldColo, oldColoMap
+		HttpingURL, Test1043URL, TCPPort, PingTimes, HttpingStatusCode, HttpingCFColo, HttpingCFColomap = oldURL, oldTest1043URL, oldPort, oldTimes, oldCode, oldColo, oldColoMap
 	})
 	_, port, err := net.SplitHostPort(s.Listener.Addr().String())
 	if err != nil {
@@ -60,6 +60,7 @@ func setupHttping(t *testing.T, s *httpingTestServer, statusCode int) {
 	}
 	TCPPort, _ = strconv.Atoi(port)
 	HttpingURL = "http://cfst.test/test"
+	Test1043URL = "http://cfst.test/test"
 	PingTimes = 3
 	HttpingStatusCode = statusCode
 	HttpingCFColo = ""
@@ -73,7 +74,7 @@ func runHttping() (int, string) {
 	return recv, colo
 }
 
-// HTTPing 只负责连通性及延迟测速（只获取响应头），1034 错误由之后的 HTTP 检查判断
+// HTTPing 只负责连通性及延迟测速（只获取响应头），1034 错误由下载测速前的 1034 检查判断
 func TestHttping(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -83,12 +84,13 @@ func TestHttping(t *testing.T) {
 		wantRecv   bool
 	}{
 		{"200 正常", 0, 200, "ok", true},
+		{"204 正常（cp.cloudflare.com 的 HEAD 请求返回 204）", 0, 204, "", true},
 		{"302 正常", 0, 302, "", true},
 		{"404 无效状态码", 0, 404, "not found", false},
 		{"403 无效状态码", 0, 403, "error code: 1034", false},
 		{"指定状态码 403", 403, 403, "forbidden", true},
-		{"指定状态码 403 时不检查响应内容（由 HTTP 检查判断 1034）", 403, 403, "error code: 1034", true},
-		{"指定状态码不匹配", 200, 302, "", false},
+		{"指定状态码 403 时不检查响应内容（由 1034 检查判断）", 403, 403, "error code: 1034", true},
+		{"指定状态码不匹配", 200, 204, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

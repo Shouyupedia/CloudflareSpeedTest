@@ -158,7 +158,11 @@ func (s DownloadSpeedSet) Len() int {
 	return len(s)
 }
 func (s DownloadSpeedSet) Less(i, j int) bool {
-	return s[i].DownloadSpeed > s[j].DownloadSpeed
+	if s[i].DownloadSpeed != s[j].DownloadSpeed {
+		return s[i].DownloadSpeed > s[j].DownloadSpeed
+	}
+	// 下载速度相同（如都没有进行下载测速）时，按 丢包率、平均延迟 排序
+	return PingDelaySet(s).Less(i, j)
 }
 func (s DownloadSpeedSet) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]

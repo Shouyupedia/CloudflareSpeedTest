@@ -19,7 +19,8 @@ import (
 
 const (
 	bufferSize                     = 1024
-	defaultURL                     = "https://cf.xiu2.xyz/url"
+	defaultURL                     = "https://speed.cloudflare.com/__down?bytes=524288000" // Cloudflare 官方测速接口 (500MiB)，默认下载测速时间内不会提前下载完
+	defaultReferer                 = "https://speed.cloudflare.com"                        // 默认下载测速地址超过 10MB 时必须带 Referer，否则返回 403
 	defaultTimeout                 = 10 * time.Second
 	defaultDisableDownload         = false
 	defaultTestNum                 = 10
@@ -30,8 +31,9 @@ const (
 )
 
 var (
-	URL         = defaultURL // 测速地址 (-url)，同时也是 下载测速地址、HTTPing 测试地址 未指定时的默认值
-	DownloadURL string       // 下载测速地址 (-durl)，为空时使用 URL
+	URL         = defaultURL     // 测速地址 (-url)：未指定下载测速地址 (-durl) 时用于下载测速，HTTPing 测试地址 (-httping-url) 为空时也使用该地址
+	DownloadURL string           // 下载测速地址 (-durl)，为空时使用 URL
+	Referer     = defaultReferer // 下载测速请求的 Referer (-referer)，为空时不发送
 	Timeout     = defaultTimeout
 	Disable     = defaultDisableDownload
 
@@ -60,9 +62,14 @@ func CheckURL() error {
 			return fmt.Errorf("下载测速地址无效 [%s]：%v", DownloadURL, err)
 		}
 	}
-	if Httping || HttpCheck {
+	if Httping {
 		if err := checkURLFormat(HttpingURL); err != nil {
-			return fmt.Errorf("HTTP 测试地址无效 [%s]：%v", HttpingURL, err)
+			return fmt.Errorf("HTTPing 测试地址无效 [%s]：%v", HttpingURL, err)
+		}
+	}
+	if Test1043URL != "" {
+		if err := checkURLFormat(Test1043URL); err != nil {
+			return fmt.Errorf("1034 检查地址无效 [%s]：%v", Test1043URL, err)
 		}
 	}
 	return nil
@@ -96,56 +103,91 @@ func checkDownloadDefault() {
 	}
 }
 
-func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSet) {
-	checkDownloadDefault()
-	if Disable {
-		return utils.DownloadSpeedSet(ipSet)
+// 下载测速：指定了 1034 检查地址 (-test_1043_url) 时，每个 IP 下载测速前先进行 1034 检查
+func testDownloadSpeed(ipSet utils.PingDelaySet, testCount int, name string) utils.DownloadSpeedSet {
+	var check func(ip *net.IPAddr) (bool, string)
+	if Test1043URL != "" {
+		check = httpCheckIP
 	}
+	return downloadTest(ipSet, testCount, name, downloadHandler, check)
+}
+
+// 按顺序对 IP 下载测速，直到凑够 testCount 个满足条件的 IP 或测完全部 IP；check 不为空时，没有通过检查的 IP 不进行下载测速，也不会出现在结果中
+func downloadTest(ipSet utils.PingDelaySet, testCount int, name string, download func(ip *net.IPAddr) (float64, string), check func(ip *net.IPAddr) (bool, string)) (speedSet utils.DownloadSpeedSet) {
+	checkDownloadDefault()
 	if len(ipSet) <= 0 { // IP 数组长度(IP数量) 大于 0 时才会继续下载测速
-		utils.Yellow.Println("[信息] 可用 IP 数量为 0，跳过下载测速。")
+		utils.Yellow.Printf("[信息] %s可用 IP 数量为 0，跳过下载测速。\n", groupLabel(name, " 中"))
 		return
 	}
-	testNum := TestCount                        // 等待下载测速的队列数量 先默认等于 下载测速数量(-dn）
-	if len(ipSet) < TestCount || MinSpeed > 0 { // 如果延迟测速并过滤后的 IP 数组长度(IP数量) 小于 下载测速数量(-dn），（即 -dn 预期数量是不够的），或者指定了 下载测速下限 (-sl) 条件（这就可能要全部下载测速一遍，直到找齐预期数量或测完为止），则 等待下载测速的队列数量 修正为 IP 数量
+	testNum := testCount // 等待下载测速的队列数量 先默认等于 下载测速数量(-dn）
+	// 如果延迟测速并过滤后的 IP 数组长度(IP数量) 小于 下载测速数量(-dn），（即 -dn 预期数量是不够的），或者指定了 下载测速下限 (-sl) 条件 或 1034 检查（不满足条件的 IP 不算数，这就可能要全部下载测速一遍，直到找齐预期数量或测完为止），则 等待下载测速的队列数量 修正为 IP 数量
+	if len(ipSet) < testCount || MinSpeed > 0 || check != nil {
 		testNum = len(ipSet)
 	}
-	if testNum < TestCount { // 如果 等待下载测速的队列数量 小于 下载测速数量(-dn），（显然 -dn 预期数量是不够的），所以 下载测速数量(-dn）修正为 等待下载测速的队列数量
-		TestCount = testNum
+	if testNum < testCount { // 如果 等待下载测速的队列数量 小于 下载测速数量(-dn），（显然 -dn 预期数量是不够的），所以 下载测速数量(-dn）修正为 等待下载测速的队列数量
+		testCount = testNum
 	}
 
-	utils.Cyan.Printf("开始下载测速（下限：%.2f MB/s, 数量：%d, 队列：%d）\n", MinSpeed, TestCount, testNum)
+	checkInfo := ""
+	if check != nil {
+		checkInfo = ", 1034 检查：" + Test1043URL
+	}
+	utils.Cyan.Printf("开始下载测速（%s下限：%.2f MB/s, 数量：%d, 队列：%d%s）\n", groupLabel(name, ", "), MinSpeed, testCount, testNum, checkInfo)
 	// 控制 下载测速进度条 与 延迟测速进度条 长度一致（强迫症）
 	bar_a := len(strconv.Itoa(len(ipSet)))
 	bar_b := "     "
 	for i := 0; i < bar_a; i++ {
 		bar_b += " "
 	}
-	bar := utils.NewBar(TestCount, bar_b, "")
+	bar := utils.NewBar(testCount, bar_b, "")
+	var tested utils.DownloadSpeedSet // 进行了下载测速的 IP（有 1034 检查时即通过了检查的 IP）
 	for i := 0; i < testNum; i++ {
-		speed, colo := downloadHandler(ipSet[i].IP)
+		if check != nil {
+			ok, colo := check(ipSet[i].IP)
+			if !ok { // 返回 Cloudflare 1034 错误或无效状态码的 IP 无法使用，跳过
+				continue
+			}
+			if ipSet[i].Colo == "" {
+				ipSet[i].Colo = colo
+			}
+		}
+		speed, colo := download(ipSet[i].IP)
 		ipSet[i].DownloadSpeed = speed
 		if ipSet[i].Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
 			ipSet[i].Colo = colo
 		}
+		tested = append(tested, ipSet[i])
 		// 在每个 IP 下载测速后，以 [下载速度下限] 条件过滤结果
 		if speed >= MinSpeed*1024*1024 {
 			bar.Grow(1, "")
 			speedSet = append(speedSet, ipSet[i]) // 高于下载速度下限时，添加到新数组中
-			if len(speedSet) == TestCount {       // 凑够满足条件的 IP 时（下载测速数量 -dn），就跳出循环
+			if len(speedSet) == testCount {       // 凑够满足条件的 IP 时（下载测速数量 -dn），就跳出循环
 				break
 			}
 		}
 	}
 	bar.Done()
-	if MinSpeed == 0.00 { // 如果没有指定下载速度下限，则直接返回所有测速数据
+	if MinSpeed == 0.00 && check == nil { // 如果没有指定下载速度下限（也没有 1034 检查），则直接返回所有测速数据
 		speedSet = utils.DownloadSpeedSet(ipSet)
-	} else if utils.Debug && len(speedSet) == 0 { // 如果指定了下载速度下限，且是调试模式下，且没有找到任何一个满足条件的 IP 时，返回所有测速数据，供用户查看当前的测速结果，以便适当调低预期测速条件
+	} else if MinSpeed > 0 && utils.Debug && len(speedSet) == 0 { // 如果指定了下载速度下限，且是调试模式下，且没有找到任何一个满足条件的 IP 时，返回所有测速数据，供用户查看当前的测速结果，以便适当调低预期测速条件
 		utils.Yellow.Println("[调试] 没有满足 下载速度下限 条件的 IP，忽略条件返回所有测速数据（方便下次测速时调整条件）。")
-		speedSet = utils.DownloadSpeedSet(ipSet)
+		if check == nil {
+			speedSet = utils.DownloadSpeedSet(ipSet)
+		} else { // 没有通过 1034 检查的 IP 无法使用，不返回
+			speedSet = tested
+		}
 	}
 	// 按速度排序
 	sort.Sort(speedSet)
 	return
+}
+
+// 输出信息中的分组名称（如 优选域名 IP），sep 为分组名称后面的分隔符
+func groupLabel(name, sep string) string {
+	if name == "" {
+		return ""
+	}
+	return name + sep
 }
 
 func getDialContext(ip *net.IPAddr) func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -221,6 +263,9 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 	}
 
 	req.Header.Set("User-Agent", userAgent)
+	if Referer != "" { // 默认下载测速地址 (speed.cloudflare.com) 超过 10MB 时要求带 Referer，否则返回 403
+		req.Header.Set("Referer", Referer)
+	}
 
 	response, err := client.Do(req)
 	if err != nil {

@@ -16,9 +16,14 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
+const (
+	defaultHttping    = true
+	defaultHttpingURL = "https://cp.cloudflare.com/" // 只需要响应头，该地址的 HEAD 请求返回 204
+)
+
 var (
-	Httping               bool
-	HttpingURL            string // HTTP 测试地址 (-httping-url)，用于 HTTPing 延迟测速及 HTTP 检查，为空时使用 URL
+	Httping               = defaultHttping    // 默认使用 HTTPing 延迟测速（-tcping 切换为 TCPing）
+	HttpingURL            = defaultHttpingURL // HTTPing 测试地址 (-httping-url)，为空时使用 URL
 	HttpingStatusCode     int
 	HttpingCFColo         string
 	HttpingCFColomap      *sync.Map
@@ -111,7 +116,7 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	return success, delay, colo
 }
 
-// 创建访问 HTTP 测试地址的请求（HTTPing 及 HTTP 检查共用）
+// 创建 HTTPing 请求
 func newHttpingRequest(method string) (*http.Request, error) {
 	request, err := http.NewRequest(method, HttpingURL, nil)
 	if err != nil {
@@ -121,18 +126,18 @@ func newHttpingRequest(method string) (*http.Request, error) {
 	return request, nil
 }
 
-// 判断 HTTP 状态码是否有效：如果未指定 HTTP 状态码，或指定的状态码不合规，则默认只认为 200、301、302 有效
+// 判断 HTTPing 返回的 HTTP 状态码是否有效：如果未指定 HTTP 状态码，或指定的状态码不合规，则默认只认为 200、204、301、302 有效
 func isValidStatusCode(statusCode int) bool {
 	if HttpingStatusCode < 100 || HttpingStatusCode > 599 {
-		return statusCode == 200 || statusCode == 301 || statusCode == 302
+		return statusCode == 200 || statusCode == 204 || statusCode == 301 || statusCode == 302
 	}
 	return statusCode == HttpingStatusCode
 }
 
-// 有效的 HTTP 状态码（用于输出信息）
+// HTTPing 有效的 HTTP 状态码（用于输出信息）
 func validStatusCodes() string {
 	if HttpingStatusCode < 100 || HttpingStatusCode > 599 {
-		return "200 301 302"
+		return "200 204 301 302"
 	}
 	return strconv.Itoa(HttpingStatusCode)
 }

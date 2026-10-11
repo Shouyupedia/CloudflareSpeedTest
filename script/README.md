@@ -171,11 +171,11 @@
 
  - 只需填写 **根域名 + 完整域名 + API 令牌**，自动查询区域 ID、解析记录 ID，记录不存在时自动创建
  - 支持同时更新 **A（IPv4）+ AAAA（IPv6）** 记录，IP 没有变化时不会重复更新
- - 测速流程：**延迟测速**（测试连通性，默认 TCPing）→ **HTTP 检查**（填写 `CFST_HTTPING_URL` 后，过滤掉访问你的网站时返回无效状态码或 **Cloudflare 1034 错误** 的 IP，即不能用于访问你网站的 IP）→ **下载测速**
+ - 测速流程：先测速**优选域名**（脚本目录下的 `bestcf-domain.txt`）解析出的 IP 并临时保存结果，再测速 IP 段数据中的 IP，最后**合并按下载速度排序**；每组 IP 都是 **延迟测速**（默认 HTTPing）→ **1034 检查**（填写 `CFST_TEST_1043_URL` 后，过滤掉访问你的网站时返回 **Cloudflare 1034 错误**或无效状态码的 IP）→ **下载测速**
  - 支持 `-durl`：单独指定下载测速地址；下载测速全部失败（速度为 0.00）时不会更新解析记录
  - API 令牌不会出现在进程列表中；配置文件只解析不执行；测速结果保存在私有临时目录；可防止定时任务重叠运行
 
-> **依赖：** bash 4+、curl、jq（如 `apt install curl jq`、`yum install curl jq`、OpenWrt 上 `opkg install bash curl jq`），以及支持 `-durl`、`-httping-url` 参数的 CFST
+> **依赖：** bash 4+、curl、jq（如 `apt install curl jq`、`yum install curl jq`、OpenWrt 上 `opkg install bash curl jq`），以及支持 `-durl`、`-test_1043_url`、`-df` 参数的 CFST
 
 <details>
 <summary><code><strong>「 使用说明」</strong></code></summary>
@@ -208,7 +208,8 @@ chmod +x cfst_cfddns.sh cfst
 0 */6 * * * /opt/cfst/cfst_cfddns.sh >> /opt/cfst/cfst_cfddns.log 2>&1
 ```
 
-> **提示：** 建议把 `CFST_HTTPING_URL` 填写为你实际要通过优选 IP 访问的网站地址（如 `https://www.example.com/cdn-cgi/trace`），这样会在延迟测速后进行 HTTP 检查，过滤掉返回 Cloudflare 1034 错误（Edge IP Restricted）的 IP，避免把不能访问你网站的 IP 同步到解析记录（延迟测速仍默认使用 TCPing，如需 HTTPing 可在 `CFST_EXTRA_ARGS` 中加上 `-httping`）。  
+> **提示：** 建议把 `CFST_TEST_1043_URL` 填写为你实际要通过优选 IP 访问的网站地址（如 `https://www.example.com/cdn-cgi/trace`），这样每个 IP 下载测速前都会检查一次，过滤掉返回 Cloudflare 1034 错误（Edge IP Restricted）的 IP，避免把不能访问你网站的 IP 同步到解析记录（延迟测速默认使用 HTTPing，如需 TCPing 可在 `CFST_EXTRA_ARGS` 中加上 `-tcping`）。  
+> **提示：** 把优选域名列表 `bestcf-domain.txt`（每行一个域名）放到脚本目录下即可优先测速其中的 IP，这些 IP 会全部进行下载测速。  
 > **提示：** 脚本不需要 root 权限，建议使用普通用户运行。已更新或无需更新时退出码为 0，没有找到满足条件的 IP、API 出错时退出码为 1。
 
 </details>

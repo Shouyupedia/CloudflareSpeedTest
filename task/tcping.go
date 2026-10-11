@@ -32,6 +32,7 @@ type Ping struct {
 	csv     utils.PingDelaySet
 	control chan bool
 	bar     *utils.Bar
+	name    string // 分组名称（如 优选域名 IP），用于输出信息
 }
 
 func checkPingDefault() {
@@ -49,16 +50,16 @@ func checkPingDefault() {
 	setDefaultURL()
 }
 
-func NewPing() *Ping {
+// 对指定的 IP 进行延迟测速，name 为分组名称（如 优选域名 IP）
+func newPing(ips []*net.IPAddr, name string) *Ping {
 	checkPingDefault()
-	ips := loadIPRanges()
 	return &Ping{
 		wg:      &sync.WaitGroup{},
 		m:       &sync.Mutex{},
 		ips:     ips,
 		csv:     make(utils.PingDelaySet, 0),
 		control: make(chan bool, Routines),
-		bar:     utils.NewBar(len(ips), "可用:", ""),
+		name:    name,
 	}
 }
 
@@ -66,11 +67,12 @@ func (p *Ping) Run() utils.PingDelaySet {
 	if len(p.ips) == 0 {
 		return p.csv
 	}
+	mode := "TCP"
 	if Httping {
-		utils.Cyan.Printf("开始延迟测速（模式：HTTP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
-	} else {
-		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
+		mode = "HTTP"
 	}
+	utils.Cyan.Printf("开始延迟测速（%s模式：%s, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", groupLabel(p.name, ", "), mode, TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
+	p.bar = utils.NewBar(len(p.ips), "可用:", "") // 有 IP 时才创建进度条（创建后就会开始输出）
 	for _, ip := range p.ips {
 		p.wg.Add(1)
 		p.control <- false
