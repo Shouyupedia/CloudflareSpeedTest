@@ -2,3 +2,7 @@ dist
 Releases
 *.exe
 *.csv
+
+# 脚本配置文件（包含 API 令牌/密钥，不要提交）
+cfst_ddns.conf
+cfst_cfddns.conf

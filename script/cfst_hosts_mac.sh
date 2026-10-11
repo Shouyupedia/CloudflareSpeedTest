@@ -2,13 +2,20 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit 1
 # --------------------------------------------------------------
 #	项目: CloudflareSpeedTest 自动更新 Hosts
-#	版本: 1.0.4
+#	版本: 1.0.6
 #	作者: XIU2
 #	项目: https://github.com/XIU2/CloudflareSpeedTest
 # --------------------------------------------------------------
+
+# 判断是否为有效的 IPv4/IPv6 地址（IP 会被写入 sed 命令中修改 Hosts，因此必须检查，避免注入其他 sed 命令）
+_IS_IP() {
+	local ipv4='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
+	local ipv6='^[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}$'
+	[[ "$1" =~ $ipv4 || "$1" =~ $ipv6 ]]
+}
 
 _CHECK() {
 	while true
@@ -16,12 +23,12 @@ _CHECK() {
 		if [[ ! -e "nowip_hosts.txt" ]]; then
 			echo -e "该脚本的作用为 CFST 测速后获取最快 IP 并替换 Hosts 中的 Cloudflare CDN IP。\n使用前请先阅读：https://github.com/XIU2/CloudflareSpeedTest/issues/42#issuecomment-768273848"
 			echo -e "第一次使用，请先将 Hosts 中所有 Cloudflare CDN IP 统一改为一个 IP。"
-			read -e -p "输入该 Cloudflare CDN IP 并回车（后续不再需要该步骤）：" NOWIP
-			if [[ ! -z "${NOWIP}" ]]; then
-				echo ${NOWIP} > nowip_hosts.txt
+			read -r -e -p "输入该 Cloudflare CDN IP 并回车（后续不再需要该步骤）：" NOWIP
+			if _IS_IP "${NOWIP}"; then
+				echo "${NOWIP}" > nowip_hosts.txt
 				break
 			else
-				echo "该 IP 不能是空！"
+				echo "请输入有效的 IP 地址！"
 			fi
 		else
 			break
@@ -31,8 +38,14 @@ _CHECK() {
 
 _UPDATE() {
 	echo -e "开始测速..."
-	NOWIP=$(head -1 nowip_hosts.txt)
+	NOWIP=$(head -1 nowip_hosts.txt | tr -d '[:space:]')
+	if ! _IS_IP "${NOWIP}"; then
+		echo "nowip_hosts.txt 中的 IP [${NOWIP}] 无效，请删除该文件后重新运行脚本..."
+		exit 1
+	fi
 
+	# 删除上次的测速结果，避免本次没有满足条件的 IP 时（不会生成结果文件）误用上次的结果
+	rm -f "result_hosts.txt"
 	# 这里可以自己添加、修改 CFST 的运行参数
 	./cfst -o "result_hosts.txt"
 
@@ -50,14 +63,19 @@ _UPDATE() {
 		echo "CFST 测速结果 IP 数量为 0，跳过下面步骤..."
 		exit 0
 	fi
-	echo ${BESTIP} > nowip_hosts.txt
+	if ! _IS_IP "${BESTIP}"; then
+		echo "CFST 测速结果中的 IP [${BESTIP}] 无效，跳过下面步骤..."
+		exit 1
+	fi
+	echo "${BESTIP}" > nowip_hosts.txt
 	echo -e "\n旧 IP 为 ${NOWIP}\n新 IP 为 ${BESTIP}\n"
 
 	echo "开始备份 Hosts 文件（hosts_backup）..."
 	\cp -f /etc/hosts /etc/hosts_backup
 
 	echo -e "开始替换..."
-	sed -i '' 's/'${NOWIP}'/'${BESTIP}'/g' /etc/hosts
+	# 只替换行首的 IP（Hosts 格式为：IP 域名），并转义 IP 中的 . 号，避免误替换其他包含该字符串的 IP（如 1.1.1.1 和 11.1.1.10）
+	sed -i '' "s/^\([[:space:]]*\)${NOWIP//./\\.}\([[:space:]]\)/\1${BESTIP}\2/" /etc/hosts
 	echo -e "完成..."
 }
 

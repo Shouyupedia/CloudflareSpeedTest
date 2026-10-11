@@ -1,0 +1,42 @@
+# cfst_cfddns.sh 配置文件
+# 复制为 cfst_cfddns.conf 后修改，并执行 chmod 600 cfst_cfddns.conf（其中有 API 令牌，不要让其他用户读取）
+# 格式为 配置项=值，等号两边可以有空格，值可以加引号；注释必须单独一行（以 # 开头）
+
+# ---------------- Cloudflare API 认证（二选一，推荐 API 令牌）----------------
+# 1. API 令牌：在 https://dash.cloudflare.com/profile/api-tokens 创建，
+#    权限为 区域(Zone).DNS:编辑(Edit)，如果下面不填 CF_ZONE_ID，还需要 区域(Zone).区域(Zone):读取(Read)
+CF_API_TOKEN=
+# 2. 全局 API 密钥 + 账号邮箱（拥有账号的全部权限，不推荐）
+CF_API_KEY=
+CF_EMAIL=
+
+# ---------------- DNS 记录 ----------------
+# 区域 ID（域名概述页面右下角），留空则根据 CF_ZONE_NAME 自动查询
+CF_ZONE_ID=
+# 根域名，CF_ZONE_ID 留空时必填
+CF_ZONE_NAME=example.com
+# 要同步优选 IP 的完整域名，记录不存在时会自动创建
+CF_RECORD_NAME=cdn.example.com
+# 记录类型：A（IPv4，使用 CFST_IP_FILE_V4 测速）、AAAA（IPv6，使用 CFST_IP_FILE_V6 测速），两个都要更新则填 A,AAAA
+CF_RECORD_TYPE=A
+# TTL：1 为自动，其他为秒数（30~86400，免费版最低 60）
+CF_TTL=1
+# 是否开启 Cloudflare 代理（小黄云），优选 IP 的记录应为 false
+CF_PROXIED=false
+
+# ---------------- CFST 测速参数 ----------------
+# CFST 程序路径，相对路径以脚本所在目录为准
+CFST_BIN=./cfst
+# IPv4 / IPv6 的 IP 段数据文件
+CFST_IP_FILE_V4=ip.txt
+CFST_IP_FILE_V6=ipv6.txt
+# 下载测速地址（-durl），留空则使用 CFST 默认地址（默认地址不保证可用性，建议自建）
+CFST_DOWNLOAD_URL=
+# HTTPing 测试地址（-httping-url），建议填写你通过优选 IP 实际要访问的网站，如 https://www.example.com/cdn-cgi/trace
+# 填写后会使用 HTTPing 模式延迟测速，并过滤掉 返回无效状态码 或 Cloudflare 1034 错误（该 IP 不能用于访问该网站）的 IP
+CFST_HTTPING_URL=
+# HTTPing 有效状态码（-httping-code），留空则 200 301 302 均视为有效
+CFST_HTTPING_CODE=
+# 其他 CFST 参数，以空格分隔（不能包含 -f -o -p，也不支持带空格的参数值），例如：
+# CFST_EXTRA_ARGS=-n 200 -tl 250 -tlr 0.2 -dn 5 -sl 2
+CFST_EXTRA_ARGS=
